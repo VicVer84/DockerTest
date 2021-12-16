@@ -29,7 +29,7 @@ let databaseName = "my-db";
 app.post('/update-profile', function (req, res) {
   let userObj = req.body;
 
-  MongoClient.connect(mongoUrlK8s, mongoClientOptions, function (err, client) {
+ /* MongoClient.connect(mongoUrlK8s, mongoClientOptions, function (err, client) {
     if (err) throw err;
 
     let db = client.db(databaseName);
@@ -43,7 +43,7 @@ app.post('/update-profile', function (req, res) {
       client.close();
     });
 
-  });
+  });*/
   // Send response
   res.send(userObj);
 });
