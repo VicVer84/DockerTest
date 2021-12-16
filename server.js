@@ -1,175 +1,75 @@
-const http = require('http');
+let express = require('express');
+let path = require('path');
+let fs = require('fs');
 let MongoClient = require('mongodb').MongoClient;
+let app = express();
+
+// bodyParser was deprecated: https://stackoverflow.com/a/59892173
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.get('/', function (req, res) {
+    res.sendFile(path.join(__dirname, "index.html"));
+  });
+
+app.get('/profile-picture', function (req, res) {
+  let img = fs.readFileSync(path.join(__dirname, "images/profile-1.jpg"));
+  res.writeHead(200, {'Content-Type': 'image/jpg' });
+  res.end(img, 'binary');
+});
 
 let mongoUrlK8s = `mongodb://${process.env.USER_NAME}:${process.env.USER_PWD}@${process.env.DB_URL}`
+
+// pass these options to mongo client connect request to avoid DeprecationWarning for current Server Discovery and Monitoring engine
 let mongoClientOptions = { useNewUrlParser: true, useUnifiedTopology: true };
 
-const css = `
-<html lang="en">
-<style>
-    .container {
-        margin: 40px auto;
-        width: 80%;
-    }
-    .button {
-        width: 160px;
-        height: 45px;
-        border-radius: 6px;
-        font-size: 15px;
-        margin-top: 20px;
-    }
-    img {
-        width: 328px;
-        height: 287px;
-        display: block;
-        margin-bottom: 20px;
-    }
-    hr {
-        width: 400px;
-        margin-left: 0;
-    }
-    h3 {
-        display: inline-block;
-    }
-    #container {
-        display: none;
-    }
-    #container-edit {
-        display: none;
-    }
-    #container-edit input {
-        height: 32px;
-    }
-    #container-edit hr {
-        margin: 25px 0;
-    }
-    #container-edit input {
-        width: 195px;
-        font-size: 15px;
-    }
-`
-const js = `
-    (async function init() {
-        const response = await fetch(``http://${window.location.host}/get-profile``);
-        console.log("response", response);
-        const user = await response.json();
-        console.log(JSON.stringify(user));
+// "user-account" in demo with docker. "my-db" in demo with docker-compose
+let databaseName = "my-db";
 
-        document.getElementById('name').textContent = user.name ? user.name : 'Anna Smith';
-        document.getElementById('email').textContent = user.email ? user.email : 'anna.smith@example.com';
-        document.getElementById('interests').textContent = user.interests ? user.interests : 'coding';
+app.post('/update-profile', function (req, res) {
+  let userObj = req.body;
 
-        const cont = document.getElementById('container');
-        cont.style.display = 'block';
-    })();
+  MongoClient.connect(mongoUrlK8s, mongoClientOptions, function (err, client) {
+    if (err) throw err;
 
-    async function handleUpdateProfileRequest() {
-        const contEdit = document.getElementById('container-edit');
-        const cont = document.getElementById('container');
+    let db = client.db(databaseName);
+    userObj['userid'] = 1;
 
-        const payload = {
-            name: document.getElementById('input-name').value, 
-            email: document.getElementById('input-email').value, 
-            interests: document.getElementById('input-interests').value
-        };
-        
-        const response = await fetch(``http://${window.location.host}/update-profile``, {
-            method: "POST",
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-        const jsonResponse = await response.json();
+    let myquery = { userid: 1 };
+    let newvalues = { $set: userObj };
 
-        document.getElementById('name').textContent = jsonResponse.name;
-        document.getElementById('email').textContent = jsonResponse.email;
-        document.getElementById('interests').textContent = jsonResponse.interests;
+    db.collection("users").updateOne(myquery, newvalues, {upsert: true}, function(err, res) {
+      if (err) throw err;
+      client.close();
+    });
 
-        cont.style.display = 'block';
-        contEdit.style.display = 'none';
-    }
+  });
+  // Send response
+  res.send(userObj);
+});
 
-    function updateProfile() {
-        const contEdit = document.getElementById('container-edit');
-        const cont = document.getElementById('container');
+app.get('/get-profile', function (req, res) {
+  let response = {};
+  // Connect to the db
+  MongoClient.connect(mongoUrlK8s, mongoClientOptions, function (err, client) {
+    if (err) throw err;
 
-        document.getElementById('input-name').value = document.getElementById('name').textContent;
-        document.getElementById('input-email').value = document.getElementById('email').textContent;
-        document.getElementById('input-interests').value = document.getElementById('interests').textContent;
+    let db = client.db(databaseName);
 
-        cont.style.display = 'none';
-        contEdit.style.display = 'block';
-    }
-`
-const html = `
-	<!DOCTYPE>
-	<html>
-		<link rel="stylesheet" href="app.css">
-		<body>
-			<div class='container' id='container'>
-				<h1>User profile</h1>
-				<img src='profile-picture' alt="user-profile">
-				<span>Name: </span><h3 id='name'>Anna Smith</h3>
-				<hr />
-				<span>Email: </span><h3 id='email'>anna.smith@example.com</h3>
-				<hr />
-				<span>Interests: </span><h3 id='interests'>coding</h3>
-				<hr />
-				<button class='button' onclick="updateProfile()">Edit Profile</button>
-			</div>
-			<div class='container' id='container-edit'>
-				<h1>User profile</h1>
-				<img src='profile-picture' alt="user-profile">
-				<span>Name: </span><label for='input-name'></label><input type="text" id='input-name' value='Anna Smith' />
-				<hr />
-				<span>Email: </span><label for='input-email'></label><input type="email" id='input-email' value='anna.smith@example.com' />
-				<hr />
-				<span>Interests: </span><label for='input-interests'></label><input type="text" id='input-interests' value='coding' />
-				<hr />
-				<button class='button' onclick="handleUpdateProfileRequest()">Update Profile</button>
-			</div>
-			<script src="app.js"/>
-		</body>
-	</html>
-`
+    let myquery = { userid: 1 };
 
-http.createServer((req, res) => {
-	switch(req.url) {
-		case '/': 
-			res.writeHead(200, { 'Contest-type': 'text/plain' });
-			res.end(html);
-		break;
-		case '/app.css': 
-			res.writeHead(200, { 'Contest-type': 'text/plain' });
-			res.end(css);
-		break;
-		case '/app.js': 
-			res.writeHead(200, { 'Contest-type': 'text/plain' });
-			res.end(js);
-		break;
-		case '/get-profile': 
-			let response = {};
-			// Connect to the db
-			MongoClient.connect(mongoUrlK8s, mongoClientOptions, function (err, client) {
-				if (err) throw err;
+    db.collection("users").findOne(myquery, function (err, result) {
+      if (err) throw err;
+      response = result;
+      client.close();
 
-				let db = client.db(databaseName);
+      // Send response
+      res.send(response ? response : {});
+    });
+  });
+});
 
-				let myquery = { userid: 1 };
-	
-				db.collection("users").findOne(myquery, function (err, result) {
-					if (err) throw err;
-					
-					response = result;
-					client.close();
+app.listen(3000, function () {
+  console.log("app listening on port 3000!");
+});
 
-					// Send response
-					res.send(response ? response : {});
-				});
-			});
-		break;
-			
-	}
-}).listen(3000, () => console.log('Server started at port: 3000!'));
